@@ -2,13 +2,43 @@
 from abc import abstractmethod
 import json
 import sys
-import datetime
 from types import FrameType
-from typing import Any, Callable, Union
+from typing import Any, Callable, Optional, Union
+
+class ViperFrame:
+  fn_name: Optional[str]
+  fn_line: Optional[int]
+  fn_file: Optional[str]
+
+  parents: list[Any]
+
+  def __init__(self, event: str, frame: FrameType):
+    self.parents = []
+
+    if frame is None:
+      return
+
+    # build up a list of parent stacks
+    tgt = frame.f_back
+    while True:
+      if tgt is None:
+        break
+
+      tgt = tgt.f_back
+      if tgt is None:
+        break
+
+      self.parents.append(ViperFrame(event, tgt))
+
+
 
 
 
 class ViperEvent:
+  frame: ViperFrame
+  event: str
+  arg: Any
+
   @classmethod
   def new(cls, frame: FrameType, event: str, arg: Any):
     """Given information about a trace event (e.g a value was returned, a call was about to be made, etc), capture the information in a
@@ -37,33 +67,18 @@ class ViperEvent:
 
   def __repr__(self) -> str:
     """Print a JSON representation of an event"""
-    return json.dumps(self.__dict__())
+    return 'no' #json.dumps(self.__dict__())
+
+
+
 
 
 # TODO improve interface; frame as a class, event as an enum, arg as a safe json repr
 class ViperEventCall(ViperEvent):
   def __init__(self, frame, event, arg):
-    self.frame = self.process_frame(frame)
+    self.frame = ViperFrame(event, frame)
     self.event = event
     self.arg = arg
-
-  def process_frame(self, frame) -> dict[str, Any]:
-    co = frame.f_code
-    func_name = co.co_name
-    caller = frame.f_back # todo unroll trace, with a cache
-
-    now = datetime.datetime.now()
-    return {
-      'fn': {
-        'name': func_name,
-        'line': frame.f_lineno,
-        'file': co.co_filename
-      },
-      'meta': {
-        'time': now.time().isoformat(),
-        'epoc': now.timestamp()
-      }
-    }
 
   def __dict__(self) -> dict[str, Any]:
     return {
