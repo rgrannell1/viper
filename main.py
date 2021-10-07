@@ -4,61 +4,44 @@ import json
 import sys
 import datetime
 from types import FrameType
-from typing import Any
-
-class Viper:
-  def __init__(self, trace) -> None:
-      self.trace = trace
-
-  def start_trace(self) -> None:
-    def trace_wrapper (frame: FrameType, event: str, arg: Any):
-      self.stop_trace()
-
-      # pass
-      viper_event = Event.new(frame, event, arg)
-      self.trace(viper_event)
-
-      self.start_trace()
-
-    sys.settrace(trace_wrapper)
-
-  def stop_trace(self) -> None:
-    sys.settrace(None)
+from typing import Any, Callable, Union
 
 
 
-
-class Event:
+class ViperEvent:
   @classmethod
   def new(cls, frame: FrameType, event: str, arg: Any):
+    """Given information about a trace event (e.g a value was returned, a call was about to be made, etc), capture the information in a
+    useful and JSON-storable format with a subclass for each event-type"""
     if event == 'call':
-      return EventCall(frame, event, arg)
-    if event == 'line':
-      return EventLine(frame, event, arg)
-    if event == 'return':
-      return EventReturn(frame, event, arg)
-    if event == 'exception':
-      return EventException(frame, event, arg)
-
-
-    if event == 'c_call':
-      return EventCCall(frame, event, arg)
-    if event == 'c_return':
-      return EventCReturn(frame, event, arg)
-    if event == 'c_exception':
-      return EventCException(frame, event, arg)
-
+      return ViperEventCall(frame, event, arg)
+    elif event == 'line':
+      return ViperEventLine(frame, event, arg)
+    elif event == 'return':
+      return ViperEventReturn(frame, event, arg)
+    elif event == 'exception':
+      return ViperEventException(frame, event, arg)
+    elif event == 'c_call':
+      return ViperEventCCall(frame, event, arg)
+    elif event == 'c_return':
+      return ViperEventCReturn(frame, event, arg)
+    elif event == 'c_exception':
+      return ViperEventCException(frame, event, arg)
+    else:
+      raise Exception('event ' + event + ' not supported')
 
   @abstractmethod
-  def dict(self):
+  def __dict__(self):
+    """An abstract method; each subclass should be representable as a dictionary"""
     raise NotImplementedError('dict() not implemented')
 
-
   def __repr__(self) -> str:
-      return json.dumps(self.dict())
+    """Print a JSON representation of an event"""
+    return json.dumps(self.__dict__())
 
 
-class EventCall(Event):
+# TODO improve interface; frame as a class, event as an enum, arg as a safe json repr
+class ViperEventCall(ViperEvent):
   def __init__(self, frame, event, arg):
     self.frame = self.process_frame(frame)
     self.event = event
@@ -82,49 +65,132 @@ class EventCall(Event):
       }
     }
 
-  def dict(self) -> dict[str, Any]:
+  def __dict__(self) -> dict[str, Any]:
     return {
       'frame': self.frame,
       'event': self.event,
       'arg': self.arg
     }
 
-class EventLine(Event):
+class ViperEventLine(ViperEvent):
   def __init__(self, frame, event, arg):
     self.frame = frame
     self.event = event
     self.arg = arg
 
-class EventReturn(Event):
+  def __dict__(self) -> dict[str, Any]:
+    return {
+      'frame': self.frame,
+      'event': self.event,
+      'arg': self.arg
+    }
+
+class ViperEventReturn(ViperEvent):
   def __init__(self, frame, event, arg):
     self.frame = frame
     self.event = event
     self.arg = arg
 
-class EventException(Event):
+  def __dict__(self) -> dict[str, Any]:
+    return {
+      'frame': self.frame,
+      'event': self.event,
+      'arg': self.arg
+    }
+
+
+class ViperEventException(ViperEvent):
   def __init__(self, frame, event, arg):
     self.frame = frame
     self.event = event
     self.arg = arg
 
-class EventCCall(Event):
+  def __dict__(self) -> dict[str, Any]:
+    return {
+      'frame': self.frame,
+      'event': self.event,
+      'arg': self.arg
+    }
+
+
+class ViperEventCCall(ViperEvent):
   def __init__(self, frame, event, arg):
     self.frame = frame
     self.event = event
     self.arg = arg
 
-class EventCReturn(Event):
+  def __dict__(self) -> dict[str, Any]:
+    return {
+      'frame': self.frame,
+      'event': self.event,
+      'arg': self.arg
+    }
+
+
+class ViperEventCReturn(ViperEvent):
   def __init__(self, frame, event, arg):
     self.frame = frame
     self.event = event
     self.arg = arg
 
-class EventCException(Event):
+  def __dict__(self) -> dict[str, Any]:
+    return {
+      'frame': self.frame,
+      'event': self.event,
+      'arg': self.arg
+    }
+
+
+class ViperEventCException(ViperEvent):
   def __init__(self, frame, event, arg):
     self.frame = frame
     self.event = event
     self.arg = arg
 
+  def __dict__(self) -> dict[str, Any]:
+    return {
+      'frame': self.frame,
+      'event': self.event,
+      'arg': self.arg
+    }
+
+
+# function parameter types
+ViperEvents = Union[ViperEventCall, ViperEventLine, ViperEventReturn,
+                    ViperEventException, ViperEventCCall, ViperEventCReturn, ViperEventCException]
+
+ViperFilterFunc = Callable[[ViperEvents], bool]
+ViperWriterFunc = Callable[[ViperEvents], Any]
+
+
+class Viper:
+  """Trace application calls, return values, and exceptions, and write the results to a callback function."""
+
+  @abstractmethod
+  def filter(self, event: ViperEvents) -> bool:
+    raise NotImplementedError("you need to implement filter")
+
+  def writer(self, event) -> None:
+    """By default, Viper will print a JSON-representation of events to stderr"""
+    print(event, file=sys.stderr)
+
+  def start_trace(self) -> None:
+    """Start tracing application"""
+    def trace_wrapper(frame: FrameType, event: str, arg: Any):
+      self.stop_trace()
+
+      # pass to user trace function
+      viper_event = ViperEvent.new(frame, event, arg)
+      if self.filter(viper_event):
+        self.writer(viper_event)
+
+      self.start_trace()
+
+    sys.settrace(trace_wrapper)
+
+  def stop_trace(self) -> None:
+    """Stop tracing application"""
+    sys.settrace(None)
 
 
 
@@ -134,18 +200,22 @@ def a(num):
     return x
 
   for idx in range(10):
-    c(idx)
+    y = c(idx)
 
   return 2
 
-def calleable(event: Event):
-  print(event)
+def filter(event: ViperEvent):
+  return isinstance(event, ViperEventCall) and event.frame
+
+class PitViper(Viper):
+  def filter(self, event):
+    return True
 
 def main():
-  vip = Viper(calleable)
+  viper = PitViper()
 
-  vip.start_trace()
+  viper.start_trace()
   a(1)
-  vip.stop_trace()
+  viper.stop_trace()
 
 main()
